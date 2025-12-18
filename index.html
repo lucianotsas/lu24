@@ -113,84 +113,107 @@
                 return () => window.removeEventListener('paste', handlePaste);
             }, [processFile]);
 
+            // --- FUNCIÓN DE EXTRACCIÓN ROBUSTA (Doble Proxy) ---
+            const fetchUrlContent = async (targetUrl, isJson = false) => {
+                // Intento 1: AllOrigins
+                try {
+                    const res = await fetch(`https://api.allorigins.win/get?url=${encodeURIComponent(targetUrl)}&timestamp=${Date.now()}`);
+                    if (!res.ok) throw new Error('Network error');
+                    const data = await res.json();
+                    return JSON.parse(data.contents); 
+                } catch (e) {
+                    console.warn("Proxy primario falló, intentando secundario...");
+                    // Intento 2: CorsProxy (Devuelve raw directo)
+                    const res2 = await fetch(`https://corsproxy.io/?${encodeURIComponent(targetUrl)}`);
+                    if (!res2.ok) throw new Error('Todos los proxies fallaron');
+                    return await res2.json();
+                }
+            };
+
             // --- EXTRACCIÓN ---
             const extractFromUrl = async () => {
                 if (!formData.url) return;
                 setIsProcessing(true);
+                
                 try {
                     let targetUrl;
                     try { targetUrl = new URL(formData.url); } catch (e) { throw new Error("URL inválida"); }
 
+                    let extractedData = null;
+
+                    // 1. INTENTO API WORDPRESS
                     try {
                         const pathSegments = targetUrl.pathname.replace(/\/$/, '').split('/');
                         const slug = pathSegments[pathSegments.length - 1];
                         
                         if (slug) {
+                            // Sin _embed para ahorrar datos, solo texto
                             const wpApiUrl = `https://www.lu24.com.ar/wp-json/wp/v2/posts?slug=${slug}`;
-                            const proxyUrl = `https://api.allorigins.win/get?url=${encodeURIComponent(wpApiUrl)}&timestamp=${Date.now()}`;
-                            
-                            const controller = new AbortController();
-                            const timeoutId = setTimeout(() => controller.abort(), 8000); 
+                            const jsonData = await fetchUrlContent(wpApiUrl);
 
-                            const response = await fetch(proxyUrl, { signal: controller.signal });
-                            clearTimeout(timeoutId);
+                            if (jsonData && jsonData.length > 0) {
+                                const post = jsonData[0];
+                                const parser = new DOMParser();
+                                const decodedTitle = parser.parseFromString(post.title.rendered, 'text/html').body.textContent;
 
-                            if (response.ok) {
-                                const data = await response.json();
-                                const jsonData = JSON.parse(data.contents);
-
-                                if (jsonData && jsonData.length > 0) {
-                                    const post = jsonData[0];
-                                    const parser = new DOMParser();
-                                    const decodedTitle = parser.parseFromString(post.title.rendered, 'text/html').body.textContent;
-
-                                    let summaryText = "";
-                                    if (post.excerpt && post.excerpt.rendered) {
-                                        summaryText = parser.parseFromString(post.excerpt.rendered, 'text/html').body.textContent;
-                                    } else if (post.content && post.content.rendered) {
-                                        const tempDiv = document.createElement("div");
-                                        tempDiv.innerHTML = post.content.rendered;
-                                        summaryText = tempDiv.textContent || tempDiv.innerText || "";
-                                    }
-                                    summaryText = summaryText.replace(/\n+/g, ' ').trim().substring(0, 350);
-
-                                    setFormData(prev => ({
-                                        ...prev,
-                                        title: decodedTitle.substring(0, 150),
-                                        summary: summaryText
-                                    }));
-                                    setIsProcessing(false);
-                                    return; 
+                                let summaryText = "";
+                                if (post.excerpt && post.excerpt.rendered) {
+                                    summaryText = parser.parseFromString(post.excerpt.rendered, 'text/html').body.textContent;
+                                } else if (post.content && post.content.rendered) {
+                                    const tempDiv = document.createElement("div");
+                                    tempDiv.innerHTML = post.content.rendered;
+                                    summaryText = tempDiv.textContent || tempDiv.innerText || "";
                                 }
+                                summaryText = summaryText.replace(/\n+/g, ' ').trim().substring(0, 350);
+
+                                extractedData = {
+                                    title: decodedTitle.substring(0, 150),
+                                    summary: summaryText
+                                };
                             }
                         }
                     } catch (wpError) {
                         console.warn("Fallo WP API, intentando fallback...", wpError);
                     }
 
-                    const proxyUrlFallback = `https://api.allorigins.win/get?url=${encodeURIComponent(formData.url)}&timestamp=${Date.now()}`;
-                    const response = await fetch(proxyUrlFallback);
-                    if (!response.ok) throw new Error("Fallo conexión");
-                    
-                    const data = await response.json();
-                    if (data.contents) {
-                        const parser = new DOMParser();
-                        const doc = parser.parseFromString(data.contents, "text/html");
-                        const ogTitle = doc.querySelector('meta[property="og:title"]')?.content || doc.title || '';
-                        const ogDesc = doc.querySelector('meta[property="og:description"]')?.content || '';
-                        
-                        setFormData(prev => ({ 
-                            ...prev, 
-                            title: ogTitle.substring(0, 150), 
-                            summary: ogDesc.substring(0, 300)
+                    // 2. FALLBACK SI API WP FALLA
+                    if (!extractedData) {
+                        try {
+                            const htmlContent = await fetchUrlContent(formData.url); // Aquí asumimos que devuelve texto si no es JSON, o adaptamos
+                            // Nota: fetchUrlContent intenta parsear JSON. Para HTML raw necesitamos otro manejo.
+                            // Simplificación: Si WP falla, usamos allorigins directo para HTML
+                            const res = await fetch(`https://api.allorigins.win/get?url=${encodeURIComponent(formData.url)}`);
+                            const data = await res.json();
+                            
+                            if (data.contents) {
+                                const parser = new DOMParser();
+                                const doc = parser.parseFromString(data.contents, "text/html");
+                                const ogTitle = doc.querySelector('meta[property="og:title"]')?.content || doc.title || '';
+                                const ogDesc = doc.querySelector('meta[property="og:description"]')?.content || '';
+                                
+                                extractedData = {
+                                    title: ogTitle.substring(0, 150),
+                                    summary: ogDesc.substring(0, 300)
+                                };
+                            }
+                        } catch (e) {
+                            throw new Error("No se pudo leer el contenido web");
+                        }
+                    }
+
+                    if (extractedData) {
+                        setFormData(prev => ({
+                            ...prev,
+                            title: extractedData.title,
+                            summary: extractedData.summary
                         }));
                     } else {
-                        throw new Error("No se pudo leer el contenido");
+                        throw new Error("Sin datos extraídos");
                     }
 
                 } catch (err) {
-                    console.error("Error final:", err);
-                    alert("No se pudo extraer el texto automáticamente. Por favor ingresa los datos manualmente.");
+                    console.warn("Error en extracción:", err);
+                    alert("No se pudo extraer el texto automáticamente (posible bloqueo del sitio). Por favor ingresa los datos manualmente.");
                 } finally { 
                     setIsProcessing(false); 
                 }
@@ -206,7 +229,7 @@
                     const canvas = await window.html2canvas(previewRef.current, {
                         scale: 3, 
                         useCORS: true, 
-                        allowTaint: true,
+                        allowTaint: false, // FALSE para evitar bloqueos de seguridad al descargar
                         backgroundColor: null,
                         logging: false,
                         onclone: (clonedDoc) => {

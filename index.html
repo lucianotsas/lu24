@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Generador de Historias LU24</title>
+    <title>Generador de Historias LU24 - Manual</title>
     
     <!-- Librerías Necesarias -->
     <script src="https://cdn.tailwindcss.com"></script>
@@ -39,9 +39,9 @@
         );
 
         // --- DATOS ---
-        const CATEGORIES = ["INFORMACIÓN", "POLICIALES", "LOCALES", "DEPORTES", "SOCIALES", "CAMPO", "FALLECIMIENTOS"];
+        // "INFORMACIÓN" Eliminado
+        const CATEGORIES = ["POLICIALES", "LOCALES", "DEPORTES", "SOCIALES", "CAMPO", "FALLECIMIENTOS"];
         const CATEGORY_THEMES = {
-            "INFORMACIÓN":    { primary: '#1e3a8a', accent: '#dc2626' }, 
             "LOCALES":        { primary: '#1e3a8a', accent: '#3b82f6' }, 
             "DEPORTES":       { primary: '#1e3a8a', accent: '#fbbf24' }, 
             "POLICIALES":     { primary: '#b91c1c', accent: '#1f2937' }, 
@@ -52,10 +52,10 @@
 
         const App = () => {
             const [formData, setFormData] = useState({
-                url: '', title: '', summary: '', category: 'INFORMACIÓN',
+                url: '', title: '', summary: '', category: 'POLICIALES', // Default cambiado
                 mainImage: null, logo: 'logolu24.png',
-                primaryColor: CATEGORY_THEMES['INFORMACIÓN'].primary,
-                accentColor: CATEGORY_THEMES['INFORMACIÓN'].accent
+                primaryColor: CATEGORY_THEMES['POLICIALES'].primary,
+                accentColor: CATEGORY_THEMES['POLICIALES'].accent
             });
             const [isProcessing, setIsProcessing] = useState(false);
             const [isGenerating, setIsGenerating] = useState(false);
@@ -63,21 +63,21 @@
             const logoInputRef = useRef(null);
             const previewRef = useRef(null);
 
-            // --- Lógica de Texto ---
             const MAX_CHARS = 217;
             const TRUNCATE_LIMIT = 214;
 
+            // --- Lógica de Texto ---
             const handleInputChange = (e) => {
                 const { name, value } = e.target;
                 if (name === 'category') {
-                    const theme = CATEGORY_THEMES[value] || CATEGORY_THEMES['INFORMACIÓN'];
+                    const theme = CATEGORY_THEMES[value] || CATEGORY_THEMES['POLICIALES'];
                     setFormData(prev => ({ ...prev, [name]: value, primaryColor: theme.primary, accentColor: theme.accent }));
                 } else {
                     setFormData(prev => ({ ...prev, [name]: value }));
                 }
             };
 
-            // --- Lógica de Imagen (Carga, Drop, Paste) ---
+            // --- Lógica de Imagen ---
             const processFile = useCallback((file) => {
                 if (file && file.type.startsWith('image/')) {
                     const reader = new FileReader();
@@ -114,39 +114,108 @@
                 return () => window.removeEventListener('paste', handlePaste);
             }, [processFile]);
 
-            // --- Extracción ---
+            // --- EXTRACCIÓN (SOLO TEXTO) ---
             const extractFromUrl = async () => {
                 if (!formData.url) return;
                 setIsProcessing(true);
+                
                 try {
-                    const proxyUrl = `https://api.allorigins.win/get?url=${encodeURIComponent(formData.url)}`;
-                    const response = await fetch(proxyUrl);
+                    let targetUrl;
+                    try { targetUrl = new URL(formData.url); } catch (e) { throw new Error("URL inválida"); }
+
+                    // INTENTO 1: API de WordPress (Solo Texto)
+                    try {
+                        const pathSegments = targetUrl.pathname.replace(/\/$/, '').split('/');
+                        const slug = pathSegments[pathSegments.length - 1];
+                        
+                        if (slug) {
+                            // Quitamos _embed porque no necesitamos imagenes
+                            const wpApiUrl = `https://www.lu24.com.ar/wp-json/wp/v2/posts?slug=${slug}`;
+                            const proxyUrl = `https://api.allorigins.win/get?url=${encodeURIComponent(wpApiUrl)}&timestamp=${Date.now()}`;
+                            
+                            const controller = new AbortController();
+                            const timeoutId = setTimeout(() => controller.abort(), 8000); 
+
+                            const response = await fetch(proxyUrl, { signal: controller.signal });
+                            clearTimeout(timeoutId);
+
+                            if (response.ok) {
+                                const data = await response.json();
+                                const jsonData = JSON.parse(data.contents);
+
+                                if (jsonData && jsonData.length > 0) {
+                                    const post = jsonData[0];
+                                    const parser = new DOMParser();
+                                    const decodedTitle = parser.parseFromString(post.title.rendered, 'text/html').body.textContent;
+
+                                    let summaryText = "";
+                                    if (post.excerpt && post.excerpt.rendered) {
+                                        summaryText = parser.parseFromString(post.excerpt.rendered, 'text/html').body.textContent;
+                                    } else if (post.content && post.content.rendered) {
+                                        const tempDiv = document.createElement("div");
+                                        tempDiv.innerHTML = post.content.rendered;
+                                        summaryText = tempDiv.textContent || tempDiv.innerText || "";
+                                    }
+                                    summaryText = summaryText.replace(/\n+/g, ' ').trim().substring(0, 350);
+
+                                    setFormData(prev => ({
+                                        ...prev,
+                                        title: decodedTitle.substring(0, 150),
+                                        summary: summaryText
+                                        // NO tocamos mainImage
+                                    }));
+                                    setIsProcessing(false);
+                                    return; 
+                                }
+                            }
+                        }
+                    } catch (wpError) {
+                        console.warn("Fallo WP API, intentando fallback...", wpError);
+                    }
+
+                    // INTENTO 2: Scrapeo Web Clásico (Fallback - Solo Texto)
+                    const proxyUrlFallback = `https://api.allorigins.win/get?url=${encodeURIComponent(formData.url)}&timestamp=${Date.now()}`;
+                    const response = await fetch(proxyUrlFallback);
+                    if (!response.ok) throw new Error("Fallo conexión");
+                    
                     const data = await response.json();
                     if (data.contents) {
                         const parser = new DOMParser();
                         const doc = parser.parseFromString(data.contents, "text/html");
                         const ogTitle = doc.querySelector('meta[property="og:title"]')?.content || doc.title || '';
                         const ogDesc = doc.querySelector('meta[property="og:description"]')?.content || '';
-                        setFormData(prev => ({ ...prev, title: ogTitle.substring(0, 150), summary: ogDesc.substring(0, 300) }));
+                        
+                        setFormData(prev => ({ 
+                            ...prev, 
+                            title: ogTitle.substring(0, 150), 
+                            summary: ogDesc.substring(0, 300)
+                            // NO tocamos mainImage
+                        }));
+                    } else {
+                        throw new Error("No se pudo leer el contenido");
                     }
-                } catch (err) { console.error(err); } finally { setIsProcessing(false); }
+
+                } catch (err) {
+                    console.error("Error final:", err);
+                    alert("No se pudo extraer el texto automáticamente. Por favor ingresa los datos manualmente.");
+                } finally { 
+                    setIsProcessing(false); 
+                }
             };
 
             // --- GENERACIÓN ---
             const generateImage = async () => {
                 if (!previewRef.current || !window.html2canvas) return;
                 setIsGenerating(true);
-                
-                // Pequeño delay para asegurar renderizado
-                await new Promise(resolve => setTimeout(resolve, 100));
+                await new Promise(resolve => setTimeout(resolve, 500));
 
                 try {
                     const canvas = await window.html2canvas(previewRef.current, {
                         scale: 3, 
                         useCORS: true, 
-                        allowTaint: true, // Importante para imagenes locales en algunos navegadores
+                        allowTaint: true,
                         backgroundColor: null,
-                        logging: true, // Activado para debug si es necesario
+                        logging: false,
                         onclone: (clonedDoc) => {
                             const summaryEl = clonedDoc.getElementById('summary-text');
                             if(summaryEl) {
@@ -156,25 +225,26 @@
                         }
                     });
                     const image = canvas.toDataURL("image/png");
+                    
+                    // Nombre corto con Fecha y Hora: Historia-DDMMYY-HHMM.png
+                    const now = new Date();
+                    const day = String(now.getDate()).padStart(2, '0');
+                    const month = String(now.getMonth() + 1).padStart(2, '0');
+                    const year = String(now.getFullYear()).slice(-2);
+                    const hours = String(now.getHours()).padStart(2, '0');
+                    const minutes = String(now.getMinutes()).padStart(2, '0');
+                    const fileName = `Historia-${day}${month}${year}-${hours}${minutes}.png`;
+
                     const link = document.createElement("a");
                     link.href = image;
-                    link.download = `Historia-LU24-${formData.category}.png`;
+                    link.download = fileName;
                     link.click();
                 } catch (err) {
-                    console.error("Error detallado:", err);
-                    alert("Error de seguridad del navegador al acceder a la imagen local.\n\nSOLUCIÓN: Haz clic en el círculo del LOGO en la vista previa y selecciona el archivo 'logolu24.png' manualmente desde tu computadora. Eso le dará permiso al navegador.");
+                    console.error(err);
+                    alert("Si el logo o la foto no salen, cárgalos manualmente desde tu PC haciendo click sobre ellos.");
                 } finally {
                     setIsGenerating(false);
                 }
-            };
-
-            // --- HELPERS ---
-            const getTruncatedSummary = (text) => {
-                if (!text) return "";
-                if (text.length <= TRUNCATE_LIMIT) return text;
-                const subString = text.substring(0, TRUNCATE_LIMIT);
-                const lastSpaceIndex = subString.lastIndexOf(" ");
-                return (lastSpaceIndex > 0 ? subString.substring(0, lastSpaceIndex) : subString) + "...";
             };
 
             const getTitleFontSize = (text) => {
@@ -183,6 +253,16 @@
                 if (len < 60) return 'text-[24px] leading-tight'; 
                 return 'text-[20px] leading-tight'; 
             };
+
+            const getSmartTruncatedSummary = (text) => {
+                if (!text) return "";
+                if (text.length <= TRUNCATE_LIMIT) return text;
+                const subString = text.substring(0, TRUNCATE_LIMIT);
+                const lastSpaceIndex = subString.lastIndexOf(" ");
+                return (lastSpaceIndex > 0 ? subString.substring(0, lastSpaceIndex) : subString) + "...";
+            };
+
+            const truncatedText = getSmartTruncatedSummary(formData.summary);
 
             return (
                 <div className="min-h-screen p-4 flex justify-center bg-slate-100 font-sans">
@@ -195,9 +275,9 @@
                             </h2>
                             
                             <div className="flex gap-2">
-                                <input type="text" placeholder="Pegar URL noticia..." className="flex-1 border p-2 rounded text-sm" value={formData.url} onChange={handleInputChange} name="url" />
+                                <input type="text" placeholder="Pegar URL noticia LU24..." className="flex-1 border p-2 rounded text-sm" value={formData.url} onChange={handleInputChange} name="url" />
                                 <button onClick={extractFromUrl} disabled={isProcessing} className="bg-blue-900 text-white px-3 rounded text-sm disabled:opacity-50">
-                                    {isProcessing ? <IconRefreshCw className="animate-spin" /> : 'Extraer'}
+                                    {isProcessing ? <IconRefreshCw className="animate-spin" /> : 'Extraer Texto'}
                                 </button>
                             </div>
 
@@ -224,7 +304,7 @@
                                         className={`flex flex-col items-center justify-center h-24 border-2 border-dashed rounded-lg cursor-pointer transition ${isDragActive ? 'border-blue-500 bg-blue-50' : 'border-slate-300 hover:bg-slate-50'}`}
                                     >
                                         <IconImage className="text-slate-400" size={24} />
-                                        <span className="text-xs text-slate-500 mt-1">{formData.mainImage ? 'Imagen Lista' : 'Subir o Pegar (Ctrl+V)'}</span>
+                                        <span className="text-xs text-slate-500 mt-1">{formData.mainImage ? 'Imagen Lista (Arrastrar para cambiar)' : 'Subir o Pegar (Ctrl+V)'}</span>
                                         <input type="file" className="hidden" accept="image/*" onChange={handleImageUpload} />
                                     </label>
                                 </div>
@@ -250,13 +330,13 @@
                                  ref={previewRef}
                                  style={{ width: '360px', height: '640px' }} // Ratio 9:16 Fijo
                             >
-                                {/* 1. BARRA SUPERIOR (Capa Decorativa) */}
+                                {/* 1. BARRA SUPERIOR */}
                                 <div className="h-2 flex shrink-0">
                                     <div className="flex-1" style={{ backgroundColor: formData.primaryColor }}></div>
                                     <div className="w-1/3" style={{ backgroundColor: formData.accentColor }}></div>
                                 </div>
 
-                                {/* 2. HEADER (Fixed Height, Shrink 0) */}
+                                {/* 2. HEADER */}
                                 <div className="h-20 px-6 flex items-center gap-4 shrink-0 bg-white z-10 relative">
                                     <div 
                                         className="w-16 h-16 flex items-center justify-center shrink-0 cursor-pointer"
@@ -267,6 +347,7 @@
                                             src={formData.logo} 
                                             className="w-full h-full object-contain" 
                                             onError={(e) => { e.target.style.display = 'none'; }}
+                                            crossOrigin="anonymous" 
                                         />
                                         <input type="file" ref={logoInputRef} className="hidden" accept="image/*" onChange={handleLogoUpload} />
                                     </div>
@@ -276,7 +357,7 @@
                                     </div>
                                 </div>
 
-                                {/* 3. TITULO (Auto Height, Shrink 0) */}
+                                {/* 3. TITULO */}
                                 <div className="px-6 py-2 shrink-0 bg-white z-10 relative">
                                     <h1 className={`font-black text-slate-900 break-words ${getTitleFontSize(formData.title)}`}>
                                         {formData.title || "Título de la Noticia"}
@@ -284,10 +365,14 @@
                                     <div className="h-1 w-12 rounded-full mt-2" style={{ backgroundColor: formData.accentColor }}></div>
                                 </div>
 
-                                {/* 4. IMAGEN (Fixed Height + Shrink 0 = ANTI-SOLAPAMIENTO) */}
+                                {/* 4. IMAGEN */}
                                 <div className="h-52 w-full mt-3 mb-3 relative bg-slate-100 shrink-0 z-0 overflow-hidden">
                                     {formData.mainImage ? (
-                                        <img src={formData.mainImage} className="w-full h-full object-cover" />
+                                        <img 
+                                            src={formData.mainImage} 
+                                            className="w-full h-full object-cover" 
+                                            crossOrigin="anonymous"
+                                        />
                                     ) : (
                                         <div className="w-full h-full flex items-center justify-center text-slate-300">
                                             <IconImage size={48} />
@@ -303,14 +388,14 @@
                                     <div className="absolute inset-0 bg-gradient-to-t from-black/20 to-transparent pointer-events-none"></div>
                                 </div>
 
-                                {/* 5. RESUMEN (Flex-1 = Ocupa lo que sobra) */}
+                                {/* 5. RESUMEN */}
                                 <div className="flex-1 px-6 pb-2 overflow-hidden bg-white relative z-10">
                                     <p className="text-slate-700 font-medium text-left text-[16px] leading-snug break-words">
-                                        {getTruncatedSummary(formData.summary) || "El resumen de la noticia aparecerá aquí. Gracias a la estructura flexible estricta, este texto ocupará el espacio disponible sin ser tapado por la foto."}
+                                        {truncatedText || "El resumen de la noticia aparecerá aquí. Gracias a la estructura flexible estricta, este texto ocupará el espacio disponible sin ser tapado por la foto."}
                                     </p>
                                 </div>
 
-                                {/* 6. FOOTER (Fixed Height, Shrink 0) */}
+                                {/* 6. FOOTER */}
                                 <div className="h-10 w-full flex items-center justify-center shrink-0 z-20" style={{ backgroundColor: formData.primaryColor }}>
                                     <span className="text-white text-[11px] font-black tracking-[0.25em] uppercase">
                                         WWW.LU24.COM.AR

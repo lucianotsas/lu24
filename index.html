@@ -39,7 +39,6 @@
         );
 
         // --- DATOS ---
-        // "INFORMACIÓN" Eliminado
         const CATEGORIES = ["POLICIALES", "LOCALES", "DEPORTES", "SOCIALES", "CAMPO", "FALLECIMIENTOS"];
         const CATEGORY_THEMES = {
             "LOCALES":        { primary: '#1e3a8a', accent: '#3b82f6' }, 
@@ -52,7 +51,7 @@
 
         const App = () => {
             const [formData, setFormData] = useState({
-                url: '', title: '', summary: '', category: 'POLICIALES', // Default cambiado
+                url: '', title: '', summary: '', category: 'POLICIALES',
                 mainImage: null, logo: 'logolu24.png',
                 primaryColor: CATEGORY_THEMES['POLICIALES'].primary,
                 accentColor: CATEGORY_THEMES['POLICIALES'].accent
@@ -114,22 +113,19 @@
                 return () => window.removeEventListener('paste', handlePaste);
             }, [processFile]);
 
-            // --- EXTRACCIÓN (SOLO TEXTO) ---
+            // --- EXTRACCIÓN ---
             const extractFromUrl = async () => {
                 if (!formData.url) return;
                 setIsProcessing(true);
-                
                 try {
                     let targetUrl;
                     try { targetUrl = new URL(formData.url); } catch (e) { throw new Error("URL inválida"); }
 
-                    // INTENTO 1: API de WordPress (Solo Texto)
                     try {
                         const pathSegments = targetUrl.pathname.replace(/\/$/, '').split('/');
                         const slug = pathSegments[pathSegments.length - 1];
                         
                         if (slug) {
-                            // Quitamos _embed porque no necesitamos imagenes
                             const wpApiUrl = `https://www.lu24.com.ar/wp-json/wp/v2/posts?slug=${slug}`;
                             const proxyUrl = `https://api.allorigins.win/get?url=${encodeURIComponent(wpApiUrl)}&timestamp=${Date.now()}`;
                             
@@ -162,7 +158,6 @@
                                         ...prev,
                                         title: decodedTitle.substring(0, 150),
                                         summary: summaryText
-                                        // NO tocamos mainImage
                                     }));
                                     setIsProcessing(false);
                                     return; 
@@ -173,7 +168,6 @@
                         console.warn("Fallo WP API, intentando fallback...", wpError);
                     }
 
-                    // INTENTO 2: Scrapeo Web Clásico (Fallback - Solo Texto)
                     const proxyUrlFallback = `https://api.allorigins.win/get?url=${encodeURIComponent(formData.url)}&timestamp=${Date.now()}`;
                     const response = await fetch(proxyUrlFallback);
                     if (!response.ok) throw new Error("Fallo conexión");
@@ -189,7 +183,6 @@
                             ...prev, 
                             title: ogTitle.substring(0, 150), 
                             summary: ogDesc.substring(0, 300)
-                            // NO tocamos mainImage
                         }));
                     } else {
                         throw new Error("No se pudo leer el contenido");
@@ -226,7 +219,6 @@
                     });
                     const image = canvas.toDataURL("image/png");
                     
-                    // Nombre corto con Fecha y Hora: Historia-DDMMYY-HHMM.png
                     const now = new Date();
                     const day = String(now.getDate()).padStart(2, '0');
                     const month = String(now.getMonth() + 1).padStart(2, '0');
@@ -365,14 +357,13 @@
                                     <div className="h-1 w-12 rounded-full mt-2" style={{ backgroundColor: formData.accentColor }}></div>
                                 </div>
 
-                                {/* 4. IMAGEN */}
+                                {/* 4. IMAGEN (Con Background Image para Crop Automático) */}
                                 <div className="h-52 w-full mt-3 mb-3 relative bg-slate-100 shrink-0 z-0 overflow-hidden">
                                     {formData.mainImage ? (
-                                        <img 
-                                            src={formData.mainImage} 
-                                            className="w-full h-full object-cover" 
-                                            crossOrigin="anonymous"
-                                        />
+                                        <div 
+                                            className="w-full h-full bg-cover bg-center bg-no-repeat"
+                                            style={{ backgroundImage: `url('${formData.mainImage}')` }}
+                                        ></div>
                                     ) : (
                                         <div className="w-full h-full flex items-center justify-center text-slate-300">
                                             <IconImage size={48} />

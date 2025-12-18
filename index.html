@@ -1,0 +1,332 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Generador de Historias LU24</title>
+    
+    <!-- Librerías Necesarias -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+
+    <style>
+        body { font-family: system-ui, -apple-system, sans-serif; }
+        .drag-active { border-color: #3b82f6 !important; background-color: #eff6ff !important; }
+    </style>
+</head>
+<body class="bg-slate-100 text-slate-800">
+
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useRef, useEffect, useCallback } = React;
+
+        // --- ICONOS ---
+        const IconImage = ({ size = 24, className }) => (
+            <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+        );
+        const IconDownload = ({ size = 24 }) => (
+            <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+        );
+        const IconRefreshCw = ({ size = 16, className }) => (
+            <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/></svg>
+        );
+        const IconTag = ({ size = 18, className }) => (
+            <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/></svg>
+        );
+
+        // --- DATOS ---
+        const CATEGORIES = ["INFORMACIÓN", "POLICIALES", "LOCALES", "DEPORTES", "SOCIALES", "CAMPO", "FALLECIMIENTOS"];
+        const CATEGORY_THEMES = {
+            "INFORMACIÓN":    { primary: '#1e3a8a', accent: '#dc2626' }, 
+            "LOCALES":        { primary: '#1e3a8a', accent: '#3b82f6' }, 
+            "DEPORTES":       { primary: '#1e3a8a', accent: '#fbbf24' }, 
+            "POLICIALES":     { primary: '#b91c1c', accent: '#1f2937' }, 
+            "SOCIALES":       { primary: '#d97706', accent: '#1e3a8a' }, 
+            "CAMPO":          { primary: '#15803d', accent: '#fbbf24' }, 
+            "FALLECIMIENTOS": { primary: '#000000', accent: '#4b5563' } 
+        };
+
+        const App = () => {
+            const [formData, setFormData] = useState({
+                url: '', title: '', summary: '', category: 'INFORMACIÓN',
+                mainImage: null, logo: 'logolu24.png',
+                primaryColor: CATEGORY_THEMES['INFORMACIÓN'].primary,
+                accentColor: CATEGORY_THEMES['INFORMACIÓN'].accent
+            });
+            const [isProcessing, setIsProcessing] = useState(false);
+            const [isGenerating, setIsGenerating] = useState(false);
+            const [isDragActive, setIsDragActive] = useState(false);
+            const logoInputRef = useRef(null);
+            const previewRef = useRef(null);
+
+            // --- Lógica de Texto ---
+            const MAX_CHARS = 217;
+            const TRUNCATE_LIMIT = 214;
+
+            const handleInputChange = (e) => {
+                const { name, value } = e.target;
+                if (name === 'category') {
+                    const theme = CATEGORY_THEMES[value] || CATEGORY_THEMES['INFORMACIÓN'];
+                    setFormData(prev => ({ ...prev, [name]: value, primaryColor: theme.primary, accentColor: theme.accent }));
+                } else {
+                    setFormData(prev => ({ ...prev, [name]: value }));
+                }
+            };
+
+            // --- Lógica de Imagen (Carga, Drop, Paste) ---
+            const processFile = useCallback((file) => {
+                if (file && file.type.startsWith('image/')) {
+                    const reader = new FileReader();
+                    reader.onloadend = () => setFormData(prev => ({ ...prev, mainImage: reader.result }));
+                    reader.readAsDataURL(file);
+                }
+            }, []);
+
+            const handleImageUpload = (e) => processFile(e.target.files[0]);
+            const handleLogoUpload = (e) => {
+                const file = e.target.files[0];
+                if (file) {
+                    const reader = new FileReader();
+                    reader.onloadend = () => setFormData(prev => ({ ...prev, logo: reader.result }));
+                    reader.readAsDataURL(file);
+                }
+            };
+
+            const handleDragOver = (e) => { e.preventDefault(); setIsDragActive(true); };
+            const handleDragLeave = (e) => { e.preventDefault(); setIsDragActive(false); };
+            const handleDrop = (e) => { e.preventDefault(); setIsDragActive(false); processFile(e.dataTransfer.files[0]); };
+
+            useEffect(() => {
+                const handlePaste = (e) => {
+                    const items = e.clipboardData.items;
+                    for (let i = 0; i < items.length; i++) {
+                        if (items[i].type.indexOf('image') !== -1) {
+                            processFile(items[i].getAsFile());
+                            break;
+                        }
+                    }
+                };
+                window.addEventListener('paste', handlePaste);
+                return () => window.removeEventListener('paste', handlePaste);
+            }, [processFile]);
+
+            // --- Extracción ---
+            const extractFromUrl = async () => {
+                if (!formData.url) return;
+                setIsProcessing(true);
+                try {
+                    const proxyUrl = `https://api.allorigins.win/get?url=${encodeURIComponent(formData.url)}`;
+                    const response = await fetch(proxyUrl);
+                    const data = await response.json();
+                    if (data.contents) {
+                        const parser = new DOMParser();
+                        const doc = parser.parseFromString(data.contents, "text/html");
+                        const ogTitle = doc.querySelector('meta[property="og:title"]')?.content || doc.title || '';
+                        const ogDesc = doc.querySelector('meta[property="og:description"]')?.content || '';
+                        setFormData(prev => ({ ...prev, title: ogTitle.substring(0, 150), summary: ogDesc.substring(0, 300) }));
+                    }
+                } catch (err) { console.error(err); } finally { setIsProcessing(false); }
+            };
+
+            // --- GENERACIÓN ---
+            const generateImage = async () => {
+                if (!previewRef.current || !window.html2canvas) return;
+                setIsGenerating(true);
+                
+                // Pequeño delay para asegurar renderizado
+                await new Promise(resolve => setTimeout(resolve, 100));
+
+                try {
+                    const canvas = await window.html2canvas(previewRef.current, {
+                        scale: 3, 
+                        useCORS: true, 
+                        allowTaint: true, // Importante para imagenes locales en algunos navegadores
+                        backgroundColor: null,
+                        logging: true, // Activado para debug si es necesario
+                        onclone: (clonedDoc) => {
+                            const summaryEl = clonedDoc.getElementById('summary-text');
+                            if(summaryEl) {
+                                summaryEl.style.overflow = 'hidden'; 
+                                summaryEl.style.display = 'block';
+                            }
+                        }
+                    });
+                    const image = canvas.toDataURL("image/png");
+                    const link = document.createElement("a");
+                    link.href = image;
+                    link.download = `Historia-LU24-${formData.category}.png`;
+                    link.click();
+                } catch (err) {
+                    console.error("Error detallado:", err);
+                    alert("Error de seguridad del navegador al acceder a la imagen local.\n\nSOLUCIÓN: Haz clic en el círculo del LOGO en la vista previa y selecciona el archivo 'logolu24.png' manualmente desde tu computadora. Eso le dará permiso al navegador.");
+                } finally {
+                    setIsGenerating(false);
+                }
+            };
+
+            // --- HELPERS ---
+            const getTruncatedSummary = (text) => {
+                if (!text) return "";
+                if (text.length <= TRUNCATE_LIMIT) return text;
+                const subString = text.substring(0, TRUNCATE_LIMIT);
+                const lastSpaceIndex = subString.lastIndexOf(" ");
+                return (lastSpaceIndex > 0 ? subString.substring(0, lastSpaceIndex) : subString) + "...";
+            };
+
+            const getTitleFontSize = (text) => {
+                const len = text ? text.length : 0;
+                if (len < 35) return 'text-[28px] leading-tight'; 
+                if (len < 60) return 'text-[24px] leading-tight'; 
+                return 'text-[20px] leading-tight'; 
+            };
+
+            return (
+                <div className="min-h-screen p-4 flex justify-center bg-slate-100 font-sans">
+                    <div className="w-full max-w-6xl grid grid-cols-1 lg:grid-cols-2 gap-8 items-start">
+                        
+                        {/* PANEL IZQUIERDO */}
+                        <div className="bg-white p-6 rounded-xl shadow-lg space-y-6">
+                            <h2 className="text-xl font-bold text-slate-800 flex items-center gap-2">
+                                <span className="bg-blue-900 text-white p-1 rounded">LU24</span> Generador
+                            </h2>
+                            
+                            <div className="flex gap-2">
+                                <input type="text" placeholder="Pegar URL noticia..." className="flex-1 border p-2 rounded text-sm" value={formData.url} onChange={handleInputChange} name="url" />
+                                <button onClick={extractFromUrl} disabled={isProcessing} className="bg-blue-900 text-white px-3 rounded text-sm disabled:opacity-50">
+                                    {isProcessing ? <IconRefreshCw className="animate-spin" /> : 'Extraer'}
+                                </button>
+                            </div>
+
+                            <div className="space-y-4">
+                                <div>
+                                    <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Título</label>
+                                    <input type="text" name="title" className="w-full border p-2 rounded font-bold text-slate-800" value={formData.title} onChange={handleInputChange} />
+                                </div>
+                                
+                                <div>
+                                    <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Categoría</label>
+                                    <div className="relative">
+                                        <select name="category" value={formData.category} onChange={handleInputChange} className="w-full border p-2 rounded appearance-none font-bold" style={{color: formData.primaryColor}}>
+                                            {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+                                        </select>
+                                        <IconTag className="absolute right-2 top-2.5 text-slate-400 pointer-events-none" size={16} />
+                                    </div>
+                                </div>
+
+                                <div>
+                                    <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Imagen (Arrastrar / Pegar)</label>
+                                    <label 
+                                        onDragOver={handleDragOver} onDragLeave={handleDragLeave} onDrop={handleDrop}
+                                        className={`flex flex-col items-center justify-center h-24 border-2 border-dashed rounded-lg cursor-pointer transition ${isDragActive ? 'border-blue-500 bg-blue-50' : 'border-slate-300 hover:bg-slate-50'}`}
+                                    >
+                                        <IconImage className="text-slate-400" size={24} />
+                                        <span className="text-xs text-slate-500 mt-1">{formData.mainImage ? 'Imagen Lista' : 'Subir o Pegar (Ctrl+V)'}</span>
+                                        <input type="file" className="hidden" accept="image/*" onChange={handleImageUpload} />
+                                    </label>
+                                </div>
+
+                                <div>
+                                    <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Resumen ({formData.summary.length}/{MAX_CHARS})</label>
+                                    <textarea 
+                                        name="summary" 
+                                        className={`w-full border p-2 rounded h-28 resize-none text-sm ${formData.summary.length > TRUNCATE_LIMIT ? 'border-amber-500 bg-amber-50' : ''}`}
+                                        value={formData.summary} onChange={handleInputChange} 
+                                    />
+                                </div>
+                            </div>
+
+                            <button onClick={generateImage} disabled={isGenerating} className="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-3 rounded-lg shadow flex items-center justify-center gap-2 transition disabled:opacity-50">
+                                {isGenerating ? 'Procesando...' : <><IconDownload size={20} /> Descargar Imagen</>}
+                            </button>
+                        </div>
+
+                        {/* PANEL DERECHO: VISTA PREVIA (CANVAS) */}
+                        <div className="flex justify-center sticky top-4">
+                            <div className="relative shadow-2xl bg-white overflow-hidden flex flex-col"
+                                 ref={previewRef}
+                                 style={{ width: '360px', height: '640px' }} // Ratio 9:16 Fijo
+                            >
+                                {/* 1. BARRA SUPERIOR (Capa Decorativa) */}
+                                <div className="h-2 flex shrink-0">
+                                    <div className="flex-1" style={{ backgroundColor: formData.primaryColor }}></div>
+                                    <div className="w-1/3" style={{ backgroundColor: formData.accentColor }}></div>
+                                </div>
+
+                                {/* 2. HEADER (Fixed Height, Shrink 0) */}
+                                <div className="h-20 px-6 flex items-center gap-4 shrink-0 bg-white z-10 relative">
+                                    <div 
+                                        className="w-16 h-16 flex items-center justify-center shrink-0 cursor-pointer"
+                                        onClick={() => logoInputRef.current.click()}
+                                        title="Haz clic aquí si tienes problemas al descargar"
+                                    >
+                                        <img 
+                                            src={formData.logo} 
+                                            className="w-full h-full object-contain" 
+                                            onError={(e) => { e.target.style.display = 'none'; }}
+                                        />
+                                        <input type="file" ref={logoInputRef} className="hidden" accept="image/*" onChange={handleLogoUpload} />
+                                    </div>
+                                    <div className="flex flex-col justify-center">
+                                        <span className="font-black text-3xl leading-none tracking-tighter" style={{ color: formData.primaryColor }}>LU24</span>
+                                        <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mt-1">Radio Tres Arroyos</span>
+                                    </div>
+                                </div>
+
+                                {/* 3. TITULO (Auto Height, Shrink 0) */}
+                                <div className="px-6 py-2 shrink-0 bg-white z-10 relative">
+                                    <h1 className={`font-black text-slate-900 break-words ${getTitleFontSize(formData.title)}`}>
+                                        {formData.title || "Título de la Noticia"}
+                                    </h1>
+                                    <div className="h-1 w-12 rounded-full mt-2" style={{ backgroundColor: formData.accentColor }}></div>
+                                </div>
+
+                                {/* 4. IMAGEN (Fixed Height + Shrink 0 = ANTI-SOLAPAMIENTO) */}
+                                <div className="h-52 w-full mt-3 mb-3 relative bg-slate-100 shrink-0 z-0 overflow-hidden">
+                                    {formData.mainImage ? (
+                                        <img src={formData.mainImage} className="w-full h-full object-cover" />
+                                    ) : (
+                                        <div className="w-full h-full flex items-center justify-center text-slate-300">
+                                            <IconImage size={48} />
+                                        </div>
+                                    )}
+                                    {/* Categoría Badge */}
+                                    <div 
+                                        className="absolute bottom-0 left-0 px-4 py-1 text-[10px] font-black uppercase tracking-widest text-white shadow-lg z-20"
+                                        style={{ backgroundColor: formData.primaryColor }}
+                                    >
+                                        {formData.category}
+                                    </div>
+                                    <div className="absolute inset-0 bg-gradient-to-t from-black/20 to-transparent pointer-events-none"></div>
+                                </div>
+
+                                {/* 5. RESUMEN (Flex-1 = Ocupa lo que sobra) */}
+                                <div className="flex-1 px-6 pb-2 overflow-hidden bg-white relative z-10">
+                                    <p className="text-slate-700 font-medium text-left text-[16px] leading-snug break-words">
+                                        {getTruncatedSummary(formData.summary) || "El resumen de la noticia aparecerá aquí. Gracias a la estructura flexible estricta, este texto ocupará el espacio disponible sin ser tapado por la foto."}
+                                    </p>
+                                </div>
+
+                                {/* 6. FOOTER (Fixed Height, Shrink 0) */}
+                                <div className="h-10 w-full flex items-center justify-center shrink-0 z-20" style={{ backgroundColor: formData.primaryColor }}>
+                                    <span className="text-white text-[11px] font-black tracking-[0.25em] uppercase">
+                                        WWW.LU24.COM.AR
+                                    </span>
+                                </div>
+
+                            </div>
+                        </div>
+
+                    </div>
+                </div>
+            );
+        };
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
